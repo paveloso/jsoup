@@ -28,6 +28,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.net.*;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
@@ -57,7 +58,7 @@ public class HttpConnection implements Connection {
      * vs in jsoup, which would otherwise default to {@code Java}. So by default, use a desktop UA.
      */
     public static final String DEFAULT_UA =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36";
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36";
     private static final String USER_AGENT = "User-Agent";
     public static final String CONTENT_TYPE = "Content-Type";
     public static final String MULTIPART_FORM_DATA = "multipart/form-data";
@@ -67,14 +68,35 @@ public class HttpConnection implements Connection {
 
     public static Connection connect(String url) {
         Connection con = new HttpConnection();
-        con.url(url);
+        con.url(getPunycodeUrl(url));
         return con;
     }
 
     public static Connection connect(URL url) {
         Connection con = new HttpConnection();
-        con.url(url);
+        con.url(getPunycodeUrl(url));
         return con;
+    }
+
+    /**
+     * Encodes the input IDN URL into a Punycode URL string
+     * @param url IDN URL
+     * @return Punycoded URL
+     */
+    private static URL getPunycodeUrl(String url) {
+        try {
+            return getPunycodeUrl(new URL(url));
+        } catch (MalformedURLException e) {
+            throw new IllegalArgumentException("Malformed URL: " + url, e);
+        }
+    }
+
+    private static URL getPunycodeUrl(URL url) {
+        try {
+            return new URL(url.getProtocol() + "://" + IDN.toASCII(url.getHost()) + url.getPath());
+        } catch (MalformedURLException e) {
+            throw new IllegalArgumentException("Malformed URL: " + url, e);
+        }
     }
 
     public HttpConnection() {
@@ -100,7 +122,7 @@ public class HttpConnection implements Connection {
         try {
             //  odd way to encode urls, but it works!
             String urlS = u.toExternalForm(); // URL external form may have spaces which is illegal in new URL() (odd asymmetry)
-            urlS = urlS.replaceAll(" ", "%20");
+            urlS = urlS.replace(" ", "%20");
             final URI uri = new URI(urlS);
             return new URL(uri.toASCIIString());
         } catch (URISyntaxException | MalformedURLException e) {
@@ -112,7 +134,7 @@ public class HttpConnection implements Connection {
     private static String encodeMimeName(String val) {
         if (val == null)
             return null;
-        return val.replaceAll("\"", "%22");
+        return val.replace("\"", "%22");
     }
 
     private Connection.Request req;
@@ -551,7 +573,7 @@ public class HttpConnection implements Connection {
 
         Request() {
             timeoutMilliseconds = 30000; // 30 seconds
-            maxBodySizeBytes = 1024 * 1024; // 1MB
+            maxBodySizeBytes = 1024 * 1024 * 2; // 2MB
             followRedirects = true;
             data = new ArrayList<>();
             method = Method.GET;
@@ -727,7 +749,7 @@ public class HttpConnection implements Connection {
 
             long startTime = System.nanoTime();
             HttpURLConnection conn = createConnection(req);
-            Response res;
+            Response res = null;
             try {
                 conn.connect();
                 if (conn.getDoOutput())
@@ -768,7 +790,7 @@ public class HttpConnection implements Connection {
                         && !contentType.startsWith("text/")
                         && !xmlContentTypeRxp.matcher(contentType).matches()
                         )
-                    throw new UnsupportedMimeTypeException("Unhandled content type. Must be text/*, application/xml, or application/xhtml+xml",
+                    throw new UnsupportedMimeTypeException("Unhandled content type. Must be text/*, application/xml, or application/*+xml",
                             contentType, req.url().toString());
 
                 // switch to the XML parser if content type is xml and not parser not explicitly set
@@ -795,10 +817,8 @@ public class HttpConnection implements Connection {
                 } else {
                     res.byteData = DataUtil.emptyByteBuffer();
                 }
-            } catch (IOException e){
-                // per Java's documentation, this is not necessary, and precludes keepalives. However in practice,
-                // connection errors will not be released quickly enough and can cause a too many open files error.
-                conn.disconnect();
+            } catch (IOException e) {
+                if (res != null) res.safeClose(); // will be non-null if got to conn
                 throw e;
             }
 

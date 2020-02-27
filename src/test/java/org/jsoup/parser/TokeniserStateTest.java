@@ -206,4 +206,75 @@ public class TokeniserStateTest {
         Document doc = Jsoup.parse(html);
         assertEquals("<p></p><p></p><div id=\"one\"><span>Two</span></div>", TextUtil.stripNewlines(doc.body().html()));
     }
+
+    @Test
+    public void testUnconsumeAtBufferBoundary() {
+        String triggeringSnippet = "<a href=\"\"foo";
+        char[] padding = new char[CharacterReader.readAheadLimit - triggeringSnippet.length() + 2]; // The "foo" part must be just at the limit.
+        Arrays.fill(padding, ' ');
+        String paddedSnippet = new StringBuilder().append(padding).append(triggeringSnippet).toString();
+        ParseErrorList errorList = ParseErrorList.tracking(1);
+
+        Parser.parseFragment(paddedSnippet, null, "", errorList);
+
+        assertEquals(CharacterReader.readAheadLimit - 1, errorList.get(0).getPosition());
+    }
+
+    @Test
+    public void testOpeningAngleBracketInsteadOfAttribute() {
+        String triggeringSnippet = "<html <";
+        ParseErrorList errorList = ParseErrorList.tracking(1);
+
+        Parser.parseFragment(triggeringSnippet, null, "", errorList);
+
+        assertEquals(6, errorList.get(0).getPosition());
+    }
+
+    @Test
+    public void testMalformedSelfClosingTag() {
+        String triggeringSnippet = "<html /ouch";
+        ParseErrorList errorList = ParseErrorList.tracking(1);
+
+        Parser.parseFragment(triggeringSnippet, null, "", errorList);
+
+        assertEquals(7, errorList.get(0).getPosition());
+    }
+
+    @Test
+    public void testOpeningAngleBracketInTagName() {
+        String triggeringSnippet = "<html<";
+        ParseErrorList errorList = ParseErrorList.tracking(1);
+
+        Parser.parseFragment(triggeringSnippet, null, "", errorList);
+
+        assertEquals(5, errorList.get(0).getPosition());
+    }
+
+    @Test
+    public void rcData() {
+        Document doc = Jsoup.parse("<title>One \0Two</title>");
+        assertEquals("One �Two", doc.title());
+    }
+
+    @Test
+    public void plaintext() {
+        Document doc = Jsoup.parse("<div>One<plaintext><div>Two</plaintext>\0no < Return");
+        assertEquals("<html><head></head><body><div>One<plaintext>&lt;div&gt;Two&lt;/plaintext&gt;�no &lt; Return</plaintext></div></body></html>", TextUtil.stripNewlines(doc.html()));
+    }
+
+    @Test
+    public void nullInTag() {
+        Document doc = Jsoup.parse("<di\0v>One</di\0v>Two");
+        assertEquals("<di�v>\n One\n</di�v>Two", doc.body().html());
+    }
+
+    @Test
+    public void attributeValUnquoted() {
+        Document doc = Jsoup.parse("<p name=foo&lt;bar>");
+        Element p = doc.selectFirst("p");
+        assertEquals("foo<bar", p.attr("name"));
+
+        doc = Jsoup.parse("<p foo=");
+        assertEquals("<p foo></p>", doc.body().html());
+    }
 }

@@ -1,7 +1,7 @@
 package org.jsoup.parser;
 
-import org.jsoup.internal.StringUtil;
 import org.jsoup.helper.Validate;
+import org.jsoup.internal.StringUtil;
 import org.jsoup.nodes.Entities;
 
 import java.util.Arrays;
@@ -53,13 +53,15 @@ final class Tokeniser {
     }
 
     Token read() {
-        while (!isEmitPending)
+        while (!isEmitPending) {
             state.read(this, reader);
+        }
 
         // if emit is pending, a non-character token was found: return any chars in buffer, and leave token for next read:
-        if (charsBuilder.length() > 0) {
-            String str = charsBuilder.toString();
-            charsBuilder.delete(0, charsBuilder.length());
+        final StringBuilder cb = this.charsBuilder;
+        if (cb.length() != 0) {
+            String str = cb.toString();
+            cb.delete(0, cb.length());
             charsString = null;
             return charPending.data(str);
         } else if (charsString != null) {
@@ -73,7 +75,7 @@ final class Tokeniser {
     }
 
     void emit(Token token) {
-        Validate.isFalse(isEmitPending, "There is an unread token pending!");
+        Validate.isFalse(isEmitPending);
 
         emitPending = token;
         isEmitPending = true;
@@ -147,6 +149,8 @@ final class Tokeniser {
                 reader.rewindToMark();
                 return null;
             }
+
+            reader.unmark();
             if (!reader.matchConsume(";"))
                 characterReferenceError("missing semicolon"); // missing semi
             int charval = -1;
@@ -181,7 +185,7 @@ final class Tokeniser {
             if (!found) {
                 reader.rewindToMark();
                 if (looksLegit) // named with semicolon
-                    characterReferenceError(String.format("invalid named reference '%s'", nameRef));
+                    characterReferenceError("invalid named reference");
                 return null;
             }
             if (inAttribute && (reader.matchesLetter() || reader.matchesDigit() || reader.matchesAny('=', '-', '_'))) {
@@ -189,6 +193,8 @@ final class Tokeniser {
                 reader.rewindToMark();
                 return null;
             }
+
+            reader.unmark();
             if (!reader.matchConsume(";"))
                 characterReferenceError("missing semicolon"); // missing semi
             int numChars = Entities.codepointsForName(nameRef, multipointHolder);
@@ -220,6 +226,11 @@ final class Tokeniser {
 
     void emitCommentPending() {
         emit(commentPending);
+    }
+
+    void createBogusCommentPending() {
+        commentPending.reset();
+        commentPending.bogus = true;
     }
 
     void createDoctypePending() {
